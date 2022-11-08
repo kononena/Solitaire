@@ -26,8 +26,8 @@ namespace Solitaire
 
         protected override void Initialize()
         {
-            _graphics.PreferredBackBufferWidth = 500;
-            _graphics.PreferredBackBufferHeight = 500;
+            _graphics.PreferredBackBufferWidth = 800;
+            _graphics.PreferredBackBufferHeight = 800;
             _graphics.IsFullScreen = false;
             _graphics.ApplyChanges();
 
@@ -95,8 +95,13 @@ namespace Solitaire
 
                 if (!isMouseDragging && x >= 0 && x < _screenWidth && y >= 0 && y < _screenHeight)
                 {
-                    stacks[(int)(x / (13 * 9)) % 4][(int)(y / (4 * 9)) % 13] += 1;
-                    stacks[(int)(x / (13 * 9)) % 4][(int)(y / (4 * 9)) % 13] %= 52;
+                    int xi = (int)(x / (13 * 9)) % 4;
+                    int yi = (int)(y / (4 * 9)) % stacks[xi].Count;
+
+                    int element = stacks[xi][yi];
+
+                    stacks[xi].Remove(element);
+                    stacks[(xi + 1) % 4].Add(element);
                 }
 
                 isMouseDragging = true;
