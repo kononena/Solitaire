@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System.Collections.Generic;
 using System;
+using System.Linq;
 
 namespace Solitaire
 {
@@ -14,8 +15,10 @@ namespace Solitaire
         private int _screenWidth;
         private int _screenHeight;
         private Texture2D[] cardTextures;
-        private List<int>[] stacks;
+        private List<(int, bool)>[] stacks;
         private bool isMouseDragging;
+        private List<(int, bool)> draggedStack;
+        private int draggedStackOrigin;
 
         public Game1()
         {
@@ -58,15 +61,15 @@ namespace Solitaire
 
         private void CreateStacks()
         {
-            stacks = new List<int>[4];
+            stacks = new List<(int, bool)>[7];
 
-            for (int x = 0; x < 4; x++)
+            for (int x = 0; x < 7; x++)
+                stacks[x] = new List<(int, bool)>();
+
+            for (int c = 0; c < 52; c++)
             {
-                stacks[x] = new List<int>();
-                for (int y = 0; y < 13; y++)
-                {
-                    stacks[x].Add(13 * x + y);
-                }
+                bool isVisible = (c % 7) <= (c / 7);
+                stacks[c % 7].Add((c, isVisible));
             }
         }
 
@@ -79,6 +82,8 @@ namespace Solitaire
             _screenHeight = _device.PresentationParameters.BackBufferHeight;
 
             isMouseDragging = false;
+            draggedStack = new List<(int, bool)>();
+            draggedStackOrigin = -1;
 
             CreateCards();
             CreateStacks();
@@ -88,27 +93,64 @@ namespace Solitaire
         {
             MouseState mouseState = Mouse.GetState();
 
+            int x = mouseState.X;
+            int y = mouseState.Y;
+
+            bool isValidLocation = x >= 0 && x < _screenWidth && y >= 0 && y < _screenHeight;
+
+            if (!isValidLocation)
+                return;
+
             if (mouseState.LeftButton == ButtonState.Pressed)
             {
-                int x = mouseState.X;
-                int y = mouseState.Y;
-
-                if (!isMouseDragging && x >= 0 && x < _screenWidth && y >= 0 && y < _screenHeight)
+                if (!isMouseDragging)
                 {
-                    int xi = (int)(x / (13 * 9)) % 4;
-                    int yi = (int)(y / (4 * 9)) % stacks[xi].Count;
-
-                    int element = stacks[xi][yi];
-
-                    stacks[xi].Remove(element);
-                    stacks[(xi + 1) % 4].Add(element);
+                    int xi = x / (13 * 6);
+                    int yi = y / (4 * 6);
+                    if (xi >= 0 && xi < 7 && yi >= 0 && yi < stacks[xi].Count && stacks[xi][yi].Item2)
+                    {
+                        draggedStack = stacks[xi].TakeLast(stacks[xi].Count - yi).ToList();
+                        draggedStackOrigin = xi;
+                        stacks[xi].RemoveRange(yi, stacks[xi].Count - yi);
+                    }
                 }
 
                 isMouseDragging = true;
             }
 
+            bool isValidTarget(int index)
+            {
+                if (stacks[index].Count == 0)
+                {
+                    return draggedStack[0].Item1 % 13 == 12;
+                }
+                else
+                {
+                    int target = stacks[index].Last().Item1;
+                    int dragged = draggedStack[0].Item1;
+                    return stacks[index].Last().Item2 && target / 13 == dragged / 13 && target == dragged + 1;
+                }
+            }
+
             if (mouseState.LeftButton == ButtonState.Released)
             {
+                if (isMouseDragging && draggedStack.Count > 0)
+                {
+                    int xi = x / (13 * 6);
+                    if (xi >= 0 && xi < 7 && isValidTarget(xi))
+                    {
+                        stacks[xi].AddRange(draggedStack);
+                        int count = stacks[draggedStackOrigin].Count;
+                        if (count > 0)
+                            stacks[draggedStackOrigin][count-1] = (stacks[draggedStackOrigin][count-1].Item1, true);
+                    }
+                    else
+                        stacks[draggedStackOrigin].AddRange(draggedStack);
+
+                    draggedStack.Clear();
+                    draggedStackOrigin = -1;
+                }
+
                 isMouseDragging = false;
             }
         }
@@ -138,11 +180,14 @@ namespace Solitaire
         {
             for (int x = 0; x < stacks.Length; x++)
             {
-                List<int> stack = stacks[x];
+                List<(int, bool)> stack = stacks[x];
                 for (int y = 0; y < stack.Count; y++)
                 {
-                    Vector2 position = new Vector2(x * 13 * 9, y * 4 * 9);
-                    _spriteBatch.Draw(cardTextures[stack[y]], position, null, Color.White, 0, Vector2.Zero, 8f, SpriteEffects.None, 0);
+                    Vector2 position = new Vector2(x * 13 * 6, y * 4 * 6);
+                    if (stack[y].Item2)
+                        _spriteBatch.Draw(cardTextures[stack[y].Item1], position, null, Color.White, 0, Vector2.Zero, 5f, SpriteEffects.None, 0);
+                    else
+                        _spriteBatch.Draw(cardTextures[stack[y].Item1], position, null, Color.Blue, 0, Vector2.Zero, 5f, SpriteEffects.None, 0);
                 }
             }
         }
