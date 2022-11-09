@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
+using System.DirectoryServices.ActiveDirectory;
 using System.Linq;
 
 namespace Solitaire
@@ -16,17 +17,19 @@ namespace Solitaire
 
         private int _screenWidth;
         private int _screenHeight;
-        private Texture2D[] cardTextures;
-        private Texture2D hiddenCard;
-        private int cardWidth;
+        private Texture2D cardTextures;
+        private Texture2D hiddenCardTexture;
+        private float cardWidth;
         private List<(int, bool)>[] stacks;
         private bool isMouseDragging;
         private List<(int, bool)> draggedStack;
         private int draggedStackOrigin;
         private Vector2 dealButtonLocation;
         private Vector2 resetButtonLocation;
-        private char[] cardTypes;
+        private Color[] cardColors;
         private int[] recoveredCards;
+        private Vector2 stackOffset;
+        private Vector2 dragOffset;
 
         public Game1()
         {
@@ -43,32 +46,6 @@ namespace Solitaire
             _graphics.ApplyChanges();
 
             base.Initialize();
-        }
-
-        private void CreateCards()
-        {
-            cardTextures = new Texture2D[52];
-            for (int c = 0; c < 52; c++)
-            {
-                Color[] cardColors = new Color[52];
-
-                for (int x = 0; x < 52; x++)
-                    cardColors[x] = Color.White;
-
-                //for (int y = 0; y <= c % 13; y++)
-                //    cardColors[(int)(c / 13) * 13 + y] = Color.Black;
-
-                cardTextures[c] = new Texture2D(_device, 13, 4, false, SurfaceFormat.Color);
-                cardTextures[c].SetData(cardColors);
-            }
-
-            Color[] hiddenCardColors = new Color[52];
-
-            for (int x = 0; x < 52; x++)
-                hiddenCardColors[x] = Color.White;
-
-            hiddenCard = new Texture2D(_device, 13, 4, false, SurfaceFormat.Color);
-            hiddenCard.SetData(hiddenCardColors);
         }
 
         private void CreateStacks()
@@ -104,18 +81,20 @@ namespace Solitaire
             _screenWidth = _device.PresentationParameters.BackBufferWidth;
             _screenHeight = _device.PresentationParameters.BackBufferHeight;
 
-            cardWidth = 70;
+            cardWidth = (float)_screenWidth / 12;
             isMouseDragging = false;
             draggedStack = new List<(int, bool)>();
             draggedStackOrigin = -1;
+            stackOffset = new Vector2(10, 10);
 
-            CreateCards();
+            cardTextures = Content.Load<Texture2D>("cards");
+            hiddenCardTexture = Content.Load<Texture2D>("hiddenCard");
             CreateStacks();
 
-            dealButtonLocation = new Vector2(7 * cardWidth, 0);
-            resetButtonLocation = new Vector2(7 * cardWidth, 50);
+            dealButtonLocation = new Vector2(7 * (cardWidth + stackOffset.X), 0) + stackOffset;
+            resetButtonLocation = new Vector2(7 * (cardWidth + stackOffset.X), 50) + stackOffset;
 
-            cardTypes = new char[] { 'A', 'B', 'C', 'D' };
+            cardColors = new Color[] { Color.LightPink, Color.LightYellow, Color.LightGreen, Color.LightSkyBlue };
         }
 
         private void DealCards()
@@ -173,8 +152,11 @@ namespace Solitaire
             {
                 if (!isMouseDragging)
                 {
-                    int xi = x / cardWidth;
-                    int yi = y / (4 * 6);
+                    int xi = (int)((x - stackOffset.X) / (cardWidth + stackOffset.X));
+                    int yi = (y - (int)stackOffset.Y) / (4 * 6);
+                    if (xi >= 0 && xi < 7 && stacks[xi].Count > 0 && yi >= stacks[xi].Count && yi < stacks[xi].Count + 4)
+                        yi = stacks[xi].Count - 1;
+                    
                     if (xi >= 0 && xi < 7 && yi >= 0 && yi < stacks[xi].Count && stacks[xi][yi].Item2)
                     {
                         if (yi == stacks[xi].Count - 1 && canBeRecovered(stacks[xi][yi].Item1))
@@ -187,8 +169,16 @@ namespace Solitaire
                         }
                         else
                         {
+                            int shift = 0;
+                            while (yi > 0 && stacks[xi][yi].Item1 % 13 > 0 && stacks[xi][yi - 1].Item1 == stacks[xi][yi].Item1 + 1)
+                            {
+                                yi--;
+                                shift++;
+                            }
+
                             draggedStack = stacks[xi].TakeLast(stacks[xi].Count - yi).ToList();
                             draggedStackOrigin = xi;
+                            dragOffset = new Vector2(x - xi * (cardWidth + stackOffset.X) - stackOffset.X, y - (yi + shift) * (4 * 6) - stackOffset.Y);
                             stacks[xi].RemoveRange(yi, stacks[xi].Count - yi);
                         }
                     }
@@ -226,7 +216,7 @@ namespace Solitaire
             {
                 if (isMouseDragging && draggedStack.Count > 0)
                 {
-                    int xi = x / cardWidth;
+                    int xi = (int)((x - stackOffset.X) / (cardWidth + stackOffset.X));
                     if (xi >= 0 && xi < 7 && isValidTarget(xi))
                     {
                         stacks[xi].AddRange(draggedStack);
@@ -239,6 +229,7 @@ namespace Solitaire
 
                     draggedStack.Clear();
                     draggedStackOrigin = -1;
+                    dragOffset = Vector2.Zero;
                 }
 
                 isMouseDragging = false;
@@ -260,9 +251,9 @@ namespace Solitaire
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
             _spriteBatch.Begin();
-            DrawCards();
             DrawButtons();
             DrawRecovered();
+            DrawCards();
             _spriteBatch.End();
 
             base.Draw(gameTime);
@@ -270,24 +261,31 @@ namespace Solitaire
 
         private void DrawCards()
         {
+            float scaler = cardWidth / hiddenCardTexture.Width;
+
             for (int x = 0; x < stacks.Length; x++)
             {
                 List<(int, bool)> stack = stacks[x];
                 for (int y = 0; y < stack.Count; y++)
                 {
-                    float scaler = cardWidth / cardTextures[stack[y].Item1].Width;
-                    Vector2 position = new Vector2(x * cardWidth, y * 4 * 6);
+                    Vector2 position = new Vector2(x * (cardWidth + stackOffset.X), y * 4 * 6) + stackOffset;
 
                     if (stack[y].Item2)
                     {
-                        _spriteBatch.Draw(cardTextures[stack[y].Item1], position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
-
-                        string name = cardTypes[stack[y].Item1 / 13] + ((stack[y].Item1 % 13) + 1).ToString();
-                        _spriteBatch.DrawString(systemFont, name, position, Color.Black);
+                        Rectangle source = new Rectangle((stack[y].Item1 % 13) * 30, (stack[y].Item1 / 13) * 60, 30, 60);
+                        _spriteBatch.Draw(cardTextures, position, source, cardColors[stack[y].Item1 / 13], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
                     }
                     else
-                        _spriteBatch.Draw(hiddenCard, position, null, Color.Blue, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                        _spriteBatch.Draw(hiddenCardTexture, position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
                 }
+            }
+
+            MouseState mouseState = Mouse.GetState();
+            for (int y = 0; y < draggedStack.Count; y++)
+            {
+                Vector2 position = new Vector2(mouseState.X, mouseState.Y + y * 4 * 6) - dragOffset;
+                Rectangle source = new Rectangle((draggedStack[y].Item1 % 13) * 30, (draggedStack[y].Item1 / 13) * 60, 30, 60);
+                _spriteBatch.Draw(cardTextures, position, source, cardColors[draggedStack[y].Item1 / 13], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
             }
         }
 
@@ -302,20 +300,18 @@ namespace Solitaire
             for (int i = 0; i < 4; i++)
             {
                 int cardNumber = recoveredCards[i];
-                Vector2 position = new Vector2(8 * cardWidth, 200 + i * 4 * 6);
+                Vector2 position = new Vector2(9 * (cardWidth + stackOffset.X), i * 150) + stackOffset;
 
                 if (cardNumber >= 0)
                 {
-                    float scaler = cardWidth / cardTextures[cardNumber + i * 13].Width;
-                    _spriteBatch.Draw(cardTextures[cardNumber], position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
-
-                    string name = cardTypes[i] + (cardNumber + 1).ToString();
-                    _spriteBatch.DrawString(systemFont, name, position, Color.Black);
+                    float scaler = cardWidth / hiddenCardTexture.Width;
+                    Rectangle source = new Rectangle(cardNumber * 30, i * 60, 30, 60);
+                    _spriteBatch.Draw(cardTextures, position, source, cardColors[i], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
                 }
                 else
                 {
-                    float scaler = cardWidth / hiddenCard.Width;
-                    _spriteBatch.Draw(hiddenCard, position, null, Color.Blue, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                    float scaler = cardWidth / hiddenCardTexture.Width;
+                    _spriteBatch.Draw(hiddenCardTexture, position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
                 }
             }
         }
