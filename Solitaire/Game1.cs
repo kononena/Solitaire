@@ -30,6 +30,8 @@ namespace Solitaire
         private int[] recoveredCards;
         private Vector2 stackOffset;
         private Vector2 dragOffset;
+        private List<(int, Vector2, Vector2, int)> movingCards;
+        private int[] recoveredArrived;
 
         public Game1()
         {
@@ -68,6 +70,7 @@ namespace Solitaire
             }
 
             recoveredCards = new int[] { -1, -1, -1, -1 };
+            recoveredArrived = new int[] { -1, -1, -1, -1 };
 
             Window.Title = "Solitaire";
         }
@@ -95,6 +98,8 @@ namespace Solitaire
             resetButtonLocation = new Vector2(7 * (cardWidth + stackOffset.X), 50) + stackOffset;
 
             cardColors = new Color[] { Color.LightPink, Color.LightYellow, Color.LightGreen, Color.LightSkyBlue };
+
+            movingCards = new List<(int, Vector2, Vector2, int)>();
         }
 
         private void DealCards()
@@ -161,6 +166,11 @@ namespace Solitaire
                     {
                         if (yi == stacks[xi].Count - 1 && canBeRecovered(stacks[xi][yi].Item1))
                         {
+                            Vector2 position = new Vector2(xi * (cardWidth + stackOffset.X) + stackOffset.X, yi * (4 * 6) + stackOffset.Y);
+                            Vector2 target = new Vector2(9 * (cardWidth + stackOffset.X), (stacks[xi][yi].Item1 / 13) * 150) + stackOffset;
+                            float distance = (target - position).Length();
+                            movingCards.Add((stacks[xi][yi].Item1, position, (target - position) / distance * 20, (int)distance / 20));
+
                             recoveredCards[stacks[xi][yi].Item1 / 13]++;
                             stacks[xi].RemoveAt(yi);
                             int count = stacks[xi].Count;
@@ -169,7 +179,7 @@ namespace Solitaire
                         }
                         else
                         {
-                            while (yi > 0 && stacks[xi][yi].Item1 % 13 > 0 && stacks[xi][yi - 1].Item1 == stacks[xi][yi].Item1 + 1)
+                            while (yi > 0 && stacks[xi][yi - 1].Item1 % 13 > 0 && stacks[xi][yi - 1].Item1 == stacks[xi][yi].Item1 + 1)
                                 yi--;
 
                             draggedStack = stacks[xi].TakeLast(stacks[xi].Count - yi).ToList();
@@ -250,6 +260,7 @@ namespace Solitaire
             DrawButtons();
             DrawRecovered();
             DrawCards();
+            DrawMovingCards();
             _spriteBatch.End();
 
             base.Draw(gameTime);
@@ -295,7 +306,7 @@ namespace Solitaire
         {
             for (int i = 0; i < 4; i++)
             {
-                int cardNumber = recoveredCards[i];
+                int cardNumber = recoveredArrived[i];
                 Vector2 position = new Vector2(9 * (cardWidth + stackOffset.X), i * 150) + stackOffset;
 
                 if (cardNumber >= 0)
@@ -308,6 +319,34 @@ namespace Solitaire
                 {
                     float scaler = cardWidth / hiddenCardTexture.Width;
                     _spriteBatch.Draw(hiddenCardTexture, position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                }
+            }
+        }
+
+        private void DrawMovingCards()
+        {
+            for (int i = movingCards.Count - 1; i >= 0; i--)
+            {
+                (int, Vector2, Vector2, int) element = movingCards[i];
+                int cardNumber = element.Item1;
+                Vector2 position = element.Item2;
+                Vector2 step = element.Item3;
+                int stepsLeft = element.Item4;
+
+                float scaler = cardWidth / hiddenCardTexture.Width;
+                Rectangle source = new Rectangle((cardNumber % 13)* 30, (cardNumber / 13) * 60, 30, 60);
+                _spriteBatch.Draw(cardTextures, position, source, cardColors[cardNumber / 13], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+
+                movingCards.RemoveAt(i);
+                if (stepsLeft > 0)
+                    movingCards.Add((cardNumber, position + step, step, stepsLeft - 1));
+                else
+                {
+                    int country = cardNumber / 13;
+                    int max = cardNumber % 13;
+                    if (max < recoveredArrived[country])
+                        max = recoveredArrived[country];
+                    recoveredArrived[country] = max;
                 }
             }
         }
