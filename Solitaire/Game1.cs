@@ -169,16 +169,12 @@ namespace Solitaire
                         }
                         else
                         {
-                            int shift = 0;
                             while (yi > 0 && stacks[xi][yi].Item1 % 13 > 0 && stacks[xi][yi - 1].Item1 == stacks[xi][yi].Item1 + 1)
-                            {
                                 yi--;
-                                shift++;
-                            }
 
                             draggedStack = stacks[xi].TakeLast(stacks[xi].Count - yi).ToList();
                             draggedStackOrigin = xi;
-                            dragOffset = new Vector2(x - xi * (cardWidth + stackOffset.X) - stackOffset.X, y - (yi + shift) * (4 * 6) - stackOffset.Y);
+                            dragOffset = new Vector2(x - xi * (cardWidth + stackOffset.X) - stackOffset.X, y - yi * (4 * 6) - stackOffset.Y);
                             stacks[xi].RemoveRange(yi, stacks[xi].Count - yi);
                         }
                     }
