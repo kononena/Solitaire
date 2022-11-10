@@ -5,6 +5,7 @@ using SharpDX.Direct2D1.Effects;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Transactions;
 using System.Xml.Serialization;
 
 namespace Solitaire
@@ -71,6 +72,7 @@ namespace Solitaire
         private float cardScaler;
         private float buttonScaler;
         private int animationScaler;
+        private int dealsLeft;
 
         public Game1()
         {
@@ -115,7 +117,7 @@ namespace Solitaire
             recoveredCards = new int[] { -1, -1, -1, -1 };
             recoveredArrived = new int[] { -1, -1, -1, -1 };
 
-            Window.Title = "Solitaire";
+            dealsLeft = 2;
         }
 
         protected override void LoadContent()
@@ -193,7 +195,7 @@ namespace Solitaire
                     stacks[i][count - 1].isVisible = true;
             }
 
-            Window.Title = Window.Title + " I";
+            dealsLeft--;
         }
 
         private void ProcessMouse()
@@ -255,8 +257,8 @@ namespace Solitaire
                     }
                     else if (draggedStack.Count == 0)
                     {
-                        if (x >= dealButtonLocation.X && x < dealButtonLocation.X + cardWidth 
-                         && y >= dealButtonLocation.Y && y < dealButtonLocation.Y + cardWidth * 11 / 32)
+                        if (dealsLeft > 0 && x >= dealButtonLocation.X && x < dealButtonLocation.X + cardWidth 
+                                          && y >= dealButtonLocation.Y && y < dealButtonLocation.Y + cardWidth * 11 / 32)
                         {
                             isCardShifting = true;
                             for (int i = 0; i < 7; i++)
@@ -493,8 +495,14 @@ namespace Solitaire
             Rectangle sourceDeal = new Rectangle(0, 0, 32, 11);
             Rectangle sourceReset = new Rectangle(0, 11, 32, 11);
 
-            _spriteBatch.Draw(buttonTextures, dealButtonLocation, sourceDeal, Color.White, 0, Vector2.Zero, buttonScaler, SpriteEffects.None, 0);
-            _spriteBatch.Draw(buttonTextures, resetButtonLocation, sourceReset, Color.White, 0, Vector2.Zero, buttonScaler, SpriteEffects.None, 0);
+            Color dealColor = Color.Green;
+            if (dealsLeft == 1)
+                dealColor = Color.Orange;
+            else if (dealsLeft <= 0)
+                dealColor = Color.Brown;
+
+            _spriteBatch.Draw(buttonTextures, dealButtonLocation, sourceDeal, dealColor, 0, Vector2.Zero, buttonScaler, SpriteEffects.None, 0);
+            _spriteBatch.Draw(buttonTextures, resetButtonLocation, sourceReset, Color.Gray, 0, Vector2.Zero, buttonScaler, SpriteEffects.None, 0);
 
             Vector2 position = 2 * resetButtonLocation - dealButtonLocation;
             _spriteBatch.Draw(emptyTexture, position, null, Color.White, 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
