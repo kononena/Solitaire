@@ -1,9 +1,11 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using SharpDX.Direct2D1.Effects;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Xml.Serialization;
 
 namespace Solitaire
 {
@@ -14,14 +16,26 @@ namespace Solitaire
         public Vector2 position { get; set; }
         public Vector2 shift { get; set; }
         public int steps { get; set; }
+        public int stack { get; set; }
+        public int stackIndex { get; set; }
+        public Rectangle textureSource { get; }
+        public bool isCardShifting { get; set; }
+        public bool shiftingVisibility { get; set; }
+        public bool isConverging { get; set; }
 
-        public Card(int number, bool isVisible)
+        public Card(int number, bool isVisible, Rectangle textureSource)
         {
             this.number = number;
             this.isVisible = isVisible;
             this.position = Vector2.Zero;
             this.shift = Vector2.Zero;
             this.steps = 0;
+            this.stack = 0;
+            this.stackIndex = 0;
+            this.textureSource = textureSource;
+            this.isCardShifting = false;
+            this.shiftingVisibility = false;
+            this.isConverging = false;
         }
     }
 
@@ -52,8 +66,11 @@ namespace Solitaire
         private int[] recoveredArrived;
         private Texture2D buttonTextures;
         private Texture2D emptyTexture;
-        private bool isDealing;
-        private bool isRetrying;
+        private bool isCardShifting;
+        private List<Card> shiftingStack;
+        private float cardScaler;
+        private float buttonScaler;
+        private int animationScaler;
 
         public Game1()
         {
@@ -91,6 +108,8 @@ namespace Solitaire
                 bool isVisible = (c % 7) <= (c / 7);
                 stacks[c % 7].Add(cards[cardNumber]);
                 cards[cardNumber].isVisible = isVisible;
+                cards[cardNumber].stack = c % 7;
+                cards[cardNumber].stackIndex = stacks[c % 7].Count - 1;
             }
 
             recoveredCards = new int[] { -1, -1, -1, -1 };
@@ -107,7 +126,7 @@ namespace Solitaire
 
             cards = new Card[52];
             for (int i = 0; i < 52; i++)
-                cards[i] = new Card(i, false);
+                cards[i] = new Card(i, false, new Rectangle((i % 13) * 30, (i / 13) * 60, 30, 60));
 
             _screenWidth = _device.PresentationParameters.BackBufferWidth;
             _screenHeight = _device.PresentationParameters.BackBufferHeight;
@@ -121,6 +140,7 @@ namespace Solitaire
             cardTextures = Content.Load<Texture2D>("cards");
             hiddenCardTexture = Content.Load<Texture2D>("hiddenCard");
             emptyTexture = Content.Load<Texture2D>("emptyCard");
+            shiftingStack = new List<Card>();
             CreateStacks();
 
             dealButtonLocation = new Vector2(7 * (cardWidth + stackOffset.X), 0) + stackOffset * 2;
@@ -130,8 +150,11 @@ namespace Solitaire
             cardColors = new Color[] { Color.LightPink, Color.LightYellow, Color.LightGreen, Color.LightSkyBlue };
 
             movingCards = new List<Card>();
-            isDealing = false;
-            isRetrying = false;
+            isCardShifting = false;
+
+            cardScaler = cardWidth / hiddenCardTexture.Width;
+            buttonScaler = cardWidth / buttonTextures.Width;
+            animationScaler = 8;
         }
 
         private void DealCards()
@@ -149,8 +172,9 @@ namespace Solitaire
                     cardNumbers.Add(stack[i].number);
             }
 
+            stacks = new List<Card>[7];
             for (int i = 0; i < 7; i++)
-                stacks[i].Clear();
+                stacks[i] = new List<Card>();
 
             for (int c = 0; c < cardNumbers.Count; c++)
             {
@@ -158,6 +182,8 @@ namespace Solitaire
                 bool isVisible = (c % 7) <= (c / 7);
                 stacks[c % 7].Add(cards[cardNumber]);
                 cards[cardNumber].isVisible = isVisible;
+                cards[cardNumber].stack = c % 7;
+                cards[cardNumber].stackIndex = stacks[c % 7].Count - 1;
             }
 
             for (int i = 0; i < 7; i++)
@@ -192,8 +218,8 @@ namespace Solitaire
                 if (!isMouseDragging)
                 {
                     int xi = (int)((x - stackOffset.X) / (cardWidth + stackOffset.X));
-                    int yi = (y - (int)stackOffset.Y) / (4 * 6);
-                    if (xi >= 0 && xi < 7 && stacks[xi].Count > 0 && yi >= stacks[xi].Count && yi < stacks[xi].Count + 4)
+                    int yi = (int)((y - stackOffset.Y) / (cardWidth / 3));
+                    if (xi >= 0 && xi < 7 && stacks[xi].Count > 0 && yi >= stacks[xi].Count && yi < stacks[xi].Count + 5)
                         yi = stacks[xi].Count - 1;
 
                     if (xi >= 0 && xi < 7 && yi >= 0 && yi < stacks[xi].Count && stacks[xi][yi].isVisible)
@@ -202,7 +228,7 @@ namespace Solitaire
 
                         if (yi == stacks[xi].Count - 1 && canBeRecovered(selectedCard.number))
                         {
-                            Vector2 position = new Vector2(xi * (cardWidth + stackOffset.X) + stackOffset.X, yi * (4 * 6) + stackOffset.Y);
+                            Vector2 position = new Vector2(xi * (cardWidth + stackOffset.X) + stackOffset.X, yi * cardWidth / 3 + stackOffset.Y);
                             Vector2 target = new Vector2(8 * (cardWidth + stackOffset.X) + 2 * stackOffset.X, (selectedCard.number / 13) * (cardWidth * 2 + stackOffset.Y)) + stackOffset;
                             float distance = (target - position).Length();
                             selectedCard.position = position;
@@ -223,7 +249,7 @@ namespace Solitaire
 
                             draggedStack = stacks[xi].TakeLast(stacks[xi].Count - yi).ToList();
                             draggedStackOrigin = xi;
-                            dragOffset = new Vector2(x - xi * (cardWidth + stackOffset.X) - stackOffset.X, y - yi * (4 * 6) - stackOffset.Y);
+                            dragOffset = new Vector2(x - xi * (cardWidth + stackOffset.X) - stackOffset.X, y - yi * cardWidth / 3 - stackOffset.Y);
                             stacks[xi].RemoveRange(yi, stacks[xi].Count - yi);
                         }
                     }
@@ -232,13 +258,74 @@ namespace Solitaire
                         if (x >= dealButtonLocation.X && x < dealButtonLocation.X + cardWidth 
                          && y >= dealButtonLocation.Y && y < dealButtonLocation.Y + cardWidth * 11 / 32)
                         {
-                            isDealing = true;
+                            isCardShifting = true;
+                            for (int i = 0; i < 7; i++)
+                            {
+                                for (int j = 0; j < stacks[i].Count; j++)
+                                {
+                                    Card card = stacks[i][j];
+                                    card.stack = i;
+                                    card.stackIndex = j;
+                                    shiftingStack.Add(card);
+                                }
+                            }
+
+                            for (int i = 0; i < shiftingStack.Count; i++)
+                            {
+                                Card card = shiftingStack[i];
+                                Vector2 position = new Vector2(card.stack * (cardWidth + stackOffset.X) + stackOffset.X, card.stackIndex * cardWidth / 3 + stackOffset.Y);
+                                Vector2 target = 2 * resetButtonLocation - dealButtonLocation;
+                                float distance = (target - position).Length();
+                                card.position = position;
+                                card.shift = (target - position) / distance * animationScaler;
+                                card.steps = (int)distance / animationScaler;
+                                card.isCardShifting = true;
+                                card.shiftingVisibility = card.isVisible;
+                                card.isConverging = true;
+                            }
+
                             DealCards();
                         }
                         else if (x >= resetButtonLocation.X && x < resetButtonLocation.X + cardWidth 
                               && y >= resetButtonLocation.Y && y < resetButtonLocation.Y + cardWidth * 11 / 32)
                         {
-                            isRetrying = true;
+                            isCardShifting = true;
+                            for (int i = 0; i < 7; i++)
+                                shiftingStack.AddRange(stacks[i]);
+                            for (int i = 0; i < 4; i++)
+                            {
+                                for (int j = 0; j <= recoveredCards[i]; j++)
+                                    shiftingStack.Add(cards[i * 13 + j]);
+                            }
+
+                            for (int i = 0; i < 7; i++)
+                            {
+                                for (int j = 0; j < stacks[i].Count; j++)
+                                {
+                                    Card card = stacks[i][j];
+                                    card.stack = i;
+                                    card.stackIndex = j;
+                                }
+                            }
+
+                            for (int i = 0; i < shiftingStack.Count; i++)
+                            {
+                                Card card = shiftingStack[i];
+                                Vector2 position = new Vector2(card.stack * (cardWidth + stackOffset.X) + stackOffset.X, card.stackIndex * cardWidth / 3 + stackOffset.Y);
+                                Vector2 target = 2 * resetButtonLocation - dealButtonLocation;
+
+                                if (card.number % 13 <= recoveredCards[card.number / 13])
+                                    position = new Vector2(8 * (cardWidth + stackOffset.X) + 2 * stackOffset.X, (card.number / 13) * (cardWidth * 2 + stackOffset.Y)) + stackOffset;
+
+                                float distance = (target - position).Length();
+                                card.position = position;
+                                card.shift = (target - position) / distance * animationScaler;
+                                card.steps = (int)distance / animationScaler;
+                                card.isCardShifting = true;
+                                card.shiftingVisibility = card.isVisible;
+                                card.isConverging = true;
+                            }
+
                             CreateStacks();
                         }
                     }
@@ -290,10 +377,69 @@ namespace Solitaire
             if (Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
-            if (true || (!isDealing && !isRetrying))
+            if (!isCardShifting)
                 ProcessMouse();
+            else if (isCardShifting)
+                UpdateCardShifting();
 
             base.Update(gameTime);
+        }
+
+        private void UpdateCardShifting()
+        {
+            if (shiftingStack.Count > 0)
+            {
+                if (shiftingStack.Any(c => c.isConverging))
+                {
+                    for (int i = 0; i < shiftingStack.Count; i++)
+                    {
+                        Card card = shiftingStack[i];
+                        if (card.steps == 0)
+                        {
+                            Vector2 position = 2 * resetButtonLocation - dealButtonLocation;
+                            Vector2 target = new Vector2(card.stack * (cardWidth + stackOffset.X) + stackOffset.X, card.stackIndex * cardWidth / 3 + stackOffset.Y);
+                            float distance = (target - position).Length();
+                            card.position = position;
+                            card.shift = (target - position) / distance * animationScaler;
+                            card.steps = (int)distance / animationScaler;
+                            card.isConverging = false;
+                        }
+                        else if (card.isConverging)
+                        {
+                            card.steps--;
+                            card.position += card.shift;
+                        }
+                    }
+                }
+                else
+                {
+                    shiftingStack = shiftingStack.OrderBy(c => -c.stack * 7 - c.stackIndex).ToList();
+                    int index = 10;
+                    if (shiftingStack.Any(c => c.stack > 5))
+                        index = shiftingStack.Where(c => c.stack > 5).Min(c => c.stackIndex);
+
+                    for (int i = 0; i < shiftingStack.Count; i++)
+                    {
+                        Card card = shiftingStack[i];
+                        if (card.stackIndex <= index)
+                        {
+                            if (card.steps == 0)
+                            {
+                                card.isCardShifting = false;
+                                shiftingStack.Remove(card);
+                            }
+                            else
+                            {
+                                card.steps--;
+                                card.position += card.shift;
+                            }
+                        }
+                    }
+                }
+
+            }
+            else
+                isCardShifting = false;
         }
 
         protected override void Draw(GameTime gameTime)
@@ -303,11 +449,9 @@ namespace Solitaire
             _spriteBatch.Begin();
             DrawButtons();
             DrawRecovered();
-            if (true || (!isDealing && !isRetrying))
-            {
-                DrawCards();
-                DrawMovingCards();
-            }
+            DrawCards();
+            DrawMovingCards();
+            DrawCardShifting();
             _spriteBatch.End();
 
             base.Draw(gameTime);
@@ -315,47 +459,45 @@ namespace Solitaire
 
         private void DrawCards()
         {
-            float scaler = cardWidth / hiddenCardTexture.Width;
-
             for (int x = 0; x < stacks.Length; x++)
             {
                 List<Card> stack = stacks[x];
                 for (int y = 0; y < stack.Count; y++)
                 {
-                    Vector2 position = new Vector2(x * (cardWidth + stackOffset.X), y * 4 * 6) + stackOffset;
-
-                    if (stack[y].isVisible)
+                    if (!stack[y].isCardShifting)
                     {
-                        Rectangle source = new Rectangle((stack[y].number % 13) * 30, (stack[y].number / 13) * 60, 30, 60);
-                        _spriteBatch.Draw(cardTextures, position, source, cardColors[stack[y].number / 13], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                        Vector2 position = new Vector2(x * (cardWidth + stackOffset.X), y * cardWidth / 3) + stackOffset;
+
+                        if (stack[y].isVisible)
+                        {
+                            Rectangle source = stack[y].textureSource;
+                            _spriteBatch.Draw(cardTextures, position, source, cardColors[stack[y].number / 13], 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
+                        }
+                        else
+                            _spriteBatch.Draw(hiddenCardTexture, position, null, Color.White, 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
                     }
-                    else
-                        _spriteBatch.Draw(hiddenCardTexture, position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
                 }
             }
 
             MouseState mouseState = Mouse.GetState();
             for (int y = 0; y < draggedStack.Count; y++)
             {
-                Vector2 position = new Vector2(mouseState.X, mouseState.Y + y * 4 * 6) - dragOffset;
-                Rectangle source = new Rectangle((draggedStack[y].number % 13) * 30, (draggedStack[y].number / 13) * 60, 30, 60);
-                _spriteBatch.Draw(cardTextures, position, source, cardColors[draggedStack[y].number / 13], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                Vector2 position = new Vector2(mouseState.X, mouseState.Y + y * cardWidth / 3) - dragOffset;
+                Rectangle source = draggedStack[y].textureSource;
+                _spriteBatch.Draw(cardTextures, position, source, cardColors[draggedStack[y].number / 13], 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
             }
         }
 
         private void DrawButtons()
         {
-            float scaler = cardWidth / buttonTextures.Width;
-
             Rectangle sourceDeal = new Rectangle(0, 0, 32, 11);
             Rectangle sourceReset = new Rectangle(0, 11, 32, 11);
 
-            _spriteBatch.Draw(buttonTextures, dealButtonLocation, sourceDeal, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
-            _spriteBatch.Draw(buttonTextures, resetButtonLocation, sourceReset, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+            _spriteBatch.Draw(buttonTextures, dealButtonLocation, sourceDeal, Color.White, 0, Vector2.Zero, buttonScaler, SpriteEffects.None, 0);
+            _spriteBatch.Draw(buttonTextures, resetButtonLocation, sourceReset, Color.White, 0, Vector2.Zero, buttonScaler, SpriteEffects.None, 0);
 
-            scaler = cardWidth / emptyTexture.Width;
-            Vector2 position = new Vector2(0, resetButtonLocation.Y - dealButtonLocation.Y) + resetButtonLocation;
-            _spriteBatch.Draw(emptyTexture, position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+            Vector2 position = 2 * resetButtonLocation - dealButtonLocation;
+            _spriteBatch.Draw(emptyTexture, position, null, Color.White, 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
         }
 
         private void DrawRecovered()
@@ -367,14 +509,12 @@ namespace Solitaire
 
                 if (cardNumber >= 0)
                 {
-                    float scaler = cardWidth / hiddenCardTexture.Width;
                     Rectangle source = new Rectangle(cardNumber * 30, i * 60, 30, 60);
-                    _spriteBatch.Draw(cardTextures, position, source, cardColors[i], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                    _spriteBatch.Draw(cardTextures, position, source, cardColors[i], 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
                 }
                 else
                 {
-                    float scaler = cardWidth / emptyTexture.Width;
-                    _spriteBatch.Draw(emptyTexture, position, null, Color.White, 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                    _spriteBatch.Draw(emptyTexture, position, null, Color.White, 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
                 }
             }
         }
@@ -385,16 +525,14 @@ namespace Solitaire
             {
                 Card card = movingCards[i];
 
-                float scaler = cardWidth / hiddenCardTexture.Width;
-                Rectangle source = new Rectangle((card.number % 13) * 30, (card.number / 13) * 60, 30, 60);
-                _spriteBatch.Draw(cardTextures, card.position, source, cardColors[card.number / 13], 0, Vector2.Zero, scaler, SpriteEffects.None, 0);
+                Rectangle source = card.textureSource;
+                _spriteBatch.Draw(cardTextures, card.position, source, cardColors[card.number / 13], 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
 
                 if (card.steps > 0)
                 {
                     card.steps--;
                     card.position += card.shift;
                 }
-                    
                 else
                 {
                     movingCards.RemoveAt(i);
@@ -404,6 +542,19 @@ namespace Solitaire
                         max = recoveredArrived[country];
                     recoveredArrived[country] = max;
                 }
+            }
+        }
+
+        private void DrawCardShifting()
+        {
+            bool usePreviousVisibility = cards.Any(c => c.isConverging);
+            foreach (Card card in shiftingStack)
+            {
+                bool isVisible = usePreviousVisibility ? card.shiftingVisibility : card.isVisible;
+                if (isVisible)
+                    _spriteBatch.Draw(cardTextures, card.position, card.textureSource, cardColors[card.number / 13], 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
+                else
+                    _spriteBatch.Draw(hiddenCardTexture, card.position, null, Color.White, 0, Vector2.Zero, cardScaler, SpriteEffects.None, 0);
             }
         }
     }
